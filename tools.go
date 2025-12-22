@@ -1,14 +1,24 @@
 package toolkit
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"math/rand/v2"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 const randStringSource = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_+"
 
-// Tools is the type used to instantiate this module. Any variable of this type will 
+// Tools is the type used to instantiate this module. Any variable of this type will
 // have access to all the methods with the reciever *Tools
-type Tools struct{}
+type Tools struct {
+	MaxFileSize      int
+	AllowedFileTypes []string
+}
 
 // RandomString generates a safe random string of length l, using randStringSource as source
 // for the string.
@@ -21,4 +31,107 @@ func (t *Tools) RandomString(l int) string {
 	return string(res)
 }
 
+// UploadedFile saves information about an uploaded file
+type UploadedFile struct {
+	OriginalFileName string
+	NewFileName      string
+	FileSize         int64
+}
 
+func (t *Tools) UploadFiles(r *http.Request, uploadDir string, rename ...bool) ([]*UploadedFile, error) {
+	renameFile := true
+	if len(rename) > 0 {
+		renameFile = rename[0]
+	}
+
+	var uploadedFiles []*UploadedFile
+
+	if t.MaxFileSize == 0 {
+		t.MaxFileSize = 1024 * 1024 * 1024
+	}
+
+	if err := r.ParseMultipartForm(int64(t.MaxFileSize)); err != nil {
+		return nil, errors.New("the uploaded file is too big.")
+	}
+
+	var err error
+	for _, fHeaders := range r.MultipartForm.File {
+		for _, hdr := range fHeaders {
+			uploadedFiles, err = func(uploadedFiles []*UploadedFile) ([]*UploadedFile, error) {
+				var uploadedFile UploadedFile
+				infile, err := hdr.Open()
+				if err != nil {
+					return nil, err
+				}
+				defer infile.Close()
+
+				buffer := make([]byte, 512)
+				if _, err = infile.Read(buffer); err != nil {
+					return nil, err
+				}
+
+				allowed := false
+				contenType := http.DetectContentType(buffer)
+				if len(t.AllowedFileTypes) > 0 {
+					for _, ft := range t.AllowedFileTypes {
+						if strings.EqualFold(contenType, ft) {
+							allowed = true
+						}
+					}
+				} else {
+					allowed = true
+				}
+
+				if !allowed {
+					return nil, errors.New("invalid file type")
+				}
+
+				if _, err := infile.Seek(0, 0); err != nil {
+					return nil, err
+				}
+
+				uploadedFile.OriginalFileName = hdr.Filename
+
+				if renameFile {
+					uploadedFile.NewFileName = fmt.Sprintf("%s%s", t.RandomString(25), filepath.Ext(hdr.Filename))
+				} else {
+					uploadedFile.NewFileName = hdr.Filename
+				}
+
+				outfile, err := os.Create(filepath.Join(uploadDir, uploadedFile.NewFileName))
+				if err != nil {
+					return nil, err
+				}
+
+				defer outfile.Close()
+				fileSize, err := io.Copy(outfile, infile)
+				if err != nil {
+					return nil, err
+				}
+				uploadedFile.FileSize = fileSize
+
+				uploadedFiles = append(uploadedFiles, &uploadedFile)
+				return uploadedFiles, nil
+
+			}(uploadedFiles)
+
+			if err != nil {
+				return uploadedFiles, err
+			}
+		}
+	}
+	return uploadedFiles, nil
+}
+
+func (t *Tools) UploadOneFile(r *http.Request, uploadDir string, rename ...bool) (*UploadedFile, error) {
+	renameFile := true
+	if len(rename) > 0 {
+		renameFile = rename[0]
+	}
+
+	files, err := t.UploadFiles(r, uploadDir, renameFile)
+	if err != nil {
+		return nil, err
+	}
+	return files[0], nil
+}
