@@ -54,10 +54,9 @@ func (t *Tools) UploadFiles(r *http.Request, uploadDir string, rename ...bool) (
 		return nil, errors.New("the uploaded file is too big.")
 	}
 
-	var err error
 	for _, fHeaders := range r.MultipartForm.File {
 		for _, hdr := range fHeaders {
-			uploadedFiles, err = func(uploadedFiles []*UploadedFile) ([]*UploadedFile, error) {
+			uploadedFile, err := func() (*UploadedFile, error) {
 				var uploadedFile UploadedFile
 				infile, err := hdr.Open()
 				if err != nil {
@@ -110,14 +109,15 @@ func (t *Tools) UploadFiles(r *http.Request, uploadDir string, rename ...bool) (
 				}
 				uploadedFile.FileSize = fileSize
 
-				uploadedFiles = append(uploadedFiles, &uploadedFile)
-				return uploadedFiles, nil
+				
+				return &uploadedFile, nil
 
-			}(uploadedFiles)
+			}()
 
 			if err != nil {
 				return uploadedFiles, err
 			}
+			uploadedFiles = append(uploadedFiles, uploadedFile)
 		}
 	}
 	return uploadedFiles, nil
