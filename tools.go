@@ -50,12 +50,15 @@ func (t *Tools) UploadFiles(r *http.Request, uploadDir string, rename ...bool) (
 		t.MaxFileSize = 1024 * 1024 * 1024
 	}
 
+	r.Body = http.MaxBytesReader(nil, r.Body, int64(t.MaxFileSize))
+
 	if err := r.ParseMultipartForm(int64(t.MaxFileSize)); err != nil {
 		return nil, errors.New("the uploaded file is too big.")
 	}
 
 	for _, fHeaders := range r.MultipartForm.File {
 		for _, hdr := range fHeaders {
+
 			uploadedFile, err := func() (*UploadedFile, error) {
 				var uploadedFile UploadedFile
 				infile, err := hdr.Open()
@@ -109,7 +112,6 @@ func (t *Tools) UploadFiles(r *http.Request, uploadDir string, rename ...bool) (
 				}
 				uploadedFile.FileSize = fileSize
 
-				
 				return &uploadedFile, nil
 
 			}()

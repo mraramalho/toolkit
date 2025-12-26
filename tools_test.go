@@ -30,7 +30,6 @@ var uploadFileTest = []struct {
 	maxFileSize      int
 	numberOfFiles    int
 }{
-	// Casos de teste de 1 arquivo (note as chaves {} dentro do slice de nomes)
 	{
 		testName:         "file too big",
 		expectsError:     true,
@@ -61,8 +60,6 @@ var uploadFileTest = []struct {
 		maxFileSize:      1024 * 1024 * 5,
 		numberOfFiles:    1,
 	},
-	// NOVO CASO: Múltiplos Arquivos
-	// Estou usando o mesmo arquivo físico 3 vezes para simular o upload de 3 arquivos diferentes
 	{
 		testName:         "upload multiple files",
 		expectsError:     false,
@@ -81,11 +78,9 @@ func TestToolsUploadFiles(t *testing.T) {
 		writer := multipart.NewWriter(pw)
 		wg := sync.WaitGroup{}
 
-		info, err := os.Stat(e.dirName)
-		if os.IsNotExist(err) || !info.IsDir() {
-			if err := os.MkdirAll(e.dirName, 0755); err != nil {
-				t.Error(err)
-			}
+		err := os.MkdirAll(e.dirName, 0755)
+		if err != nil {
+			t.Fatalf("não foi possível garantir o diretório de teste: %v", err)
 		}
 
 		wg.Add(1)
@@ -99,13 +94,11 @@ func TestToolsUploadFiles(t *testing.T) {
 
 				part, err := writer.CreateFormFile("file", filePath)
 				if err != nil {
-					t.Errorf("creating form file error: %s", err.Error())
 					return
 				}
 
 				f, err := os.Open(filePath)
 				if err != nil {
-					t.Errorf("opening file error: %s", err.Error())
 					return
 				}
 
@@ -113,7 +106,7 @@ func TestToolsUploadFiles(t *testing.T) {
 				f.Close()
 
 				if err != nil {
-					t.Errorf("error copying file bytes: %s", err.Error())
+					return
 				}
 			}
 		}()
@@ -134,6 +127,10 @@ func TestToolsUploadFiles(t *testing.T) {
 
 		if err != nil && !e.expectsError {
 			t.Error("test error:", err, "for test:", e.testName)
+		}
+
+		if err == nil && e.expectsError {
+			t.Errorf("%s: expected error but none found", e.testName)
 		}
 
 		if !e.expectsError && len(uploadedFiles) != e.numberOfFiles {
@@ -157,6 +154,85 @@ func TestToolsUploadFiles(t *testing.T) {
 			_ = os.Remove(path)
 		}
 
+		pr.Close()
+
+		wg.Wait()
+	}
+}
+
+func TestToolsUploadOneFile(t *testing.T) {
+	for _, e := range uploadFileTest {
+		pr, pw := io.Pipe()
+		writer := multipart.NewWriter(pw)
+		wg := sync.WaitGroup{}
+
+		err := os.MkdirAll(e.dirName, 0755)
+		if err != nil {
+			t.Fatalf("não foi possível garantir o diretório de teste: %v", err)
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer pw.Close()
+			defer writer.Close()
+
+			filePath := filepath.Join(e.dirName, e.fileNames[0])
+			part, err := writer.CreateFormFile("file", filePath)
+			if err != nil {
+				return
+			}
+
+			f, err := os.Open(filePath)
+			if err != nil {
+				return
+			}
+
+			_, err = io.Copy(part, f)
+			f.Close()
+
+			if err != nil {
+				return
+			}
+		}()
+
+		request := httptest.NewRequest("POST", "/", pr)
+		request.Header.Add("Content-Type", writer.FormDataContentType())
+
+		testTools := Tools{
+			AllowedFileTypes: e.allowedFileTypes,
+			MaxFileSize:      int(e.maxFileSize),
+		}
+
+		uploadDir := filepath.Join(e.dirName, "uploads")
+		os.MkdirAll(uploadDir, 0755)
+
+		uploadedFile, err := testTools.UploadOneFile(request, uploadDir, e.renameFile)
+
+		if err != nil {
+			if !e.expectsError {
+				t.Errorf("%s: unexpected error: %s", e.testName, err.Error())
+			}
+		} else {
+			if e.expectsError {
+				t.Errorf("%s: expected error but none found", e.testName)
+			}
+
+			if uploadedFile != nil {
+				if !e.renameFile {
+					if uploadedFile.NewFileName != uploadedFile.OriginalFileName {
+						t.Errorf("%s: file renamed when should not", e.testName)
+					}
+				}
+				path := filepath.Join(uploadDir, uploadedFile.NewFileName)
+				if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+					t.Errorf("%s: expected file to exist: %s", e.testName, statErr.Error())
+				} else {
+					_ = os.Remove(path)
+				}
+			}
+		}
+		pr.Close()
 		wg.Wait()
 	}
 }
