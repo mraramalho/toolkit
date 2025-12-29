@@ -21,6 +21,10 @@ type Tools struct {
 	AllowedFileTypes []string
 }
 
+func New() *Tools {
+	return &Tools{}
+}
+
 // RandomString generates a safe random string of length l, using randStringSource as source
 // for the string.
 func (t *Tools) RandomString(l int) string {
@@ -164,4 +168,14 @@ func (t *Tools) Slugfy(s string) (string, error) {
 	}
 
 	return slug, nil
+}
+
+// DownloadStaticFile downloads a file, and tries to force the browser to avoid displaying it
+// in the browser window by setting content disposition. It also allows specification of
+// the display name
+func (t *Tools) DownloadStaticFile(w http.ResponseWriter, r *http.Request, p, file, displayName string) {
+	filePath := filepath.Join(p, file)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", displayName))
+
+	http.ServeFile(w, r, filePath)
 }

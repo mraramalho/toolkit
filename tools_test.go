@@ -1,6 +1,7 @@
 package toolkit
 
 import (
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http/httptest"
@@ -10,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestRandomString(t *testing.T) {
+func TestToolsRandomString(t *testing.T) {
 	tools := new(Tools)
 	str := tools.RandomString(10)
 
@@ -300,4 +301,36 @@ func TestToolsSlugfy(t *testing.T) {
 		}
 	}
 
+}
+
+func TestToolsDownloadStaticFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	fileName := "testfile.txt"
+	content := []byte("conteúdo do arquivo de teste")
+	filePath := filepath.Join(tmpDir, fileName)
+
+	if err := os.WriteFile(filePath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	displayName := "meu-download.txt"
+	tools := New()
+
+	req := httptest.NewRequest("GET", "/download", nil)
+	rr := httptest.NewRecorder()
+
+	tools.DownloadStaticFile(rr, req, tmpDir, fileName, displayName)
+
+	if rr.Code != 200 {
+		t.Errorf("esperava status 200, recebeu %d", rr.Code)
+	}
+
+	expectedHeader := fmt.Sprintf("attachment; filename=\"%s\"", displayName)
+	if got := rr.Header().Get("Content-Disposition"); got != expectedHeader {
+		t.Errorf("cabeçalho Content-Disposition incorreto: esperado %s, recebeu %s", expectedHeader, got)
+	}
+
+	if rr.Body.String() != string(content) {
+		t.Errorf("conteúdo do arquivo incorreto: esperado %s, recebeu %s", string(content), rr.Body.String())
+	}
 }
