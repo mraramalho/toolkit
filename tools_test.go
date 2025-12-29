@@ -121,8 +121,6 @@ func TestToolsUploadFiles(t *testing.T) {
 
 		uploadDir := filepath.Join(e.dirName, "uploads")
 
-		os.MkdirAll(uploadDir, 0755)
-
 		uploadedFiles, err := testTools.UploadFiles(request, uploadDir, e.renameFile)
 
 		if err != nil && !e.expectsError {
@@ -165,11 +163,6 @@ func TestToolsUploadOneFile(t *testing.T) {
 		pr, pw := io.Pipe()
 		writer := multipart.NewWriter(pw)
 		wg := sync.WaitGroup{}
-
-		err := os.MkdirAll(e.dirName, 0755)
-		if err != nil {
-			t.Fatalf("não foi possível garantir o diretório de teste: %v", err)
-		}
 
 		wg.Add(1)
 		go func() {
@@ -234,5 +227,40 @@ func TestToolsUploadOneFile(t *testing.T) {
 		}
 		pr.Close()
 		wg.Wait()
+	}
+}
+
+var testDirs = []struct {
+	testName     string
+	expectsError bool
+	dirName      string
+	mode         os.FileMode
+	errorMsg     string
+}{
+	{"creates dir", false, "./tempDir", 0755, ""},
+	{"directory already exists", false, "./tempDir", 0755, ""},
+	{"creates subdirectory", false, "./tempDir/anotherTempDir", 0755, ""},
+	{"dir cannot be created", true, "C:/Users/x0lc/tempDir", 0755, "mkdir C:/Users/x0lc: Access is denied."},
+}
+
+func TestToolsCreateDirIfNotExists(t *testing.T) {
+	var testTools Tools
+	for _, e := range testDirs {
+		err := testTools.CreateDirIfNotExists(e.dirName, e.mode)
+		if err != nil && !e.expectsError {
+			t.Error("expected no error for test", e.testName, "but found one:", err)
+		}
+
+		if err == nil && e.expectsError {
+			t.Error("expected one error for test", e.testName, "but none found:", err)
+		}
+
+		if e.expectsError && err.Error() != e.errorMsg {
+			t.Error("wrong error received for test", e.testName, "expected:", e.errorMsg, "received:", err)
+		}
+	}
+
+	if err := os.RemoveAll(testDirs[0].dirName); err != nil {
+		t.Error("error removing temdirs:", err)
 	}
 }

@@ -44,6 +44,10 @@ func (t *Tools) UploadFiles(r *http.Request, uploadDir string, rename ...bool) (
 		renameFile = rename[0]
 	}
 
+	if err := t.CreateDirIfNotExists(uploadDir, 0755); err != nil {
+		return nil, err
+	}
+
 	var uploadedFiles []*UploadedFile
 
 	if t.MaxFileSize == 0 {
@@ -136,4 +140,12 @@ func (t *Tools) UploadOneFile(r *http.Request, uploadDir string, rename ...bool)
 		return nil, err
 	}
 	return files[0], nil
+}
+
+// CreateDirIfNotExists creates a dir if it does not exist
+func (t *Tools) CreateDirIfNotExists(path string, mode os.FileMode) error {
+	if err := os.MkdirAll(path, mode); err != nil {
+		return err
+	}
+	return nil
 }
