@@ -21,6 +21,7 @@ type Tools struct {
 	AllowedFileTypes []string
 }
 
+// New returns an instance of Tools
 func New() *Tools {
 	return &Tools{}
 }
@@ -43,6 +44,7 @@ type UploadedFile struct {
 	FileSize         int64
 }
 
+// UploadFiles uploads an slice of files to a server
 func (t *Tools) UploadFiles(r *http.Request, uploadDir string, rename ...bool) ([]*UploadedFile, error) {
 	renameFile := true
 	if len(rename) > 0 {
@@ -179,3 +181,10 @@ func (t *Tools) DownloadStaticFile(w http.ResponseWriter, r *http.Request, p, fi
 
 	http.ServeFile(w, r, filePath)
 }
+
+
+// WORKING WITH JSON
+
+// TODO: Reading Json
+// TODO: Writing Json
+// TODO: Push Json to a remote server
