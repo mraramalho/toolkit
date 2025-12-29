@@ -264,3 +264,40 @@ func TestToolsCreateDirIfNotExists(t *testing.T) {
 		t.Error("error removing temdirs:", err)
 	}
 }
+
+var slugTestTable = []struct {
+	testName       string
+	expectsError   bool
+	errorMsg       string
+	stringToSlugfy string
+	expectedSlug   string
+}{
+	{"simple slug transformation", false, "", "hello World 123", "hello-world-123"},
+	{"all caps string", false, "", "HELLO WORLD ", "hello-world"},
+	{"exclamation sign", false, "", "HELLO WORLD!", "hello-world"},
+	{"empty slug after slugfy string", true, "empty string, after slug process", "!*%.", ""},
+	{"empty string not allowed", true, "empty string not allowed", "", ""},
+}
+
+func TestToolsSlugfy(t *testing.T) {
+	var testTools Tools
+	for _, e := range slugTestTable {
+		slug, err := testTools.Slugfy(e.stringToSlugfy)
+		if err != nil && !e.expectsError {
+			t.Error("unexpected error for test", e.testName, "error:", err)
+		}
+
+		if err == nil && e.expectsError {
+			t.Error("expected error for test", e.testName, "error:", e.errorMsg, "but none found")
+		}
+
+		if err != nil && e.errorMsg != err.Error() {
+			t.Error("unexpected error message for test", e.testName, "expected error message:", e.errorMsg, "found:", err.Error())
+		}
+
+		if slug != e.expectedSlug {
+			t.Error("unexpected slug for test", e.testName, "expected slug:", e.expectedSlug, "slug received:", slug)
+		}
+	}
+
+}
