@@ -115,4 +115,4 @@ func Download(w http.ResponseWriter, r *http.Request) {
 
 ## License
 
-[MIT](https://www.google.com/search?q=LICENSE)
+MIT
