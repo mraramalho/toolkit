@@ -1,6 +1,7 @@
 package toolkit
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -14,7 +15,7 @@ import (
 	"time"
 )
 
-func TestToolsRandomString(t *testing.T) {
+func TestTools_RandomString(t *testing.T) {
 	tools := new(Tools)
 	str := tools.RandomString(10)
 
@@ -76,26 +77,109 @@ var uploadFileTest = []struct {
 	},
 }
 
-func TestToolsUploadFiles(t *testing.T) {
+func TestTools_UploadFiles(t *testing.T) {
 	for _, e := range uploadFileTest {
-		pr, pw := io.Pipe()
-		writer := multipart.NewWriter(pw)
-		wg := sync.WaitGroup{}
+		t.Run(e.testName, func(t *testing.T) {
+			pr, pw := io.Pipe()
+			writer := multipart.NewWriter(pw)
+			wg := sync.WaitGroup{}
 
-		err := os.MkdirAll(e.dirName, 0755)
-		if err != nil {
-			t.Fatalf("não foi possível garantir o diretório de teste: %v", err)
-		}
+			err := os.MkdirAll(e.dirName, 0755)
+			if err != nil {
+				t.Fatalf("não foi possível garantir o diretório de teste: %v", err)
+			}
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer pw.Close()
-			defer writer.Close()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer pw.Close()
+				defer writer.Close()
 
-			for _, fileName := range e.fileNames {
-				filePath := filepath.Join(e.dirName, fileName)
+				for _, fileName := range e.fileNames {
+					filePath := filepath.Join(e.dirName, fileName)
 
+					part, err := writer.CreateFormFile("file", filePath)
+					if err != nil {
+						return
+					}
+
+					f, err := os.Open(filePath)
+					if err != nil {
+						return
+					}
+
+					_, err = io.Copy(part, f)
+					f.Close()
+
+					if err != nil {
+						return
+					}
+				}
+			}()
+
+			request := httptest.NewRequest("POST", "/", pr)
+			request.Header.Add("Content-Type", writer.FormDataContentType())
+
+			testTools := Tools{
+				AllowedFileTypes: e.allowedFileTypes,
+				MaxFileSize:      int(e.maxFileSize),
+			}
+
+			uploadDir := filepath.Join(e.dirName, "uploads")
+
+			uploadedFiles, err := testTools.UploadFiles(request, uploadDir, e.renameFile)
+
+			if err != nil && !e.expectsError {
+				t.Error("test error:", err, "for test:", e.testName)
+			}
+
+			if err == nil && e.expectsError {
+				t.Errorf("%s: expected error but none found", e.testName)
+			}
+
+			if !e.expectsError && len(uploadedFiles) != e.numberOfFiles {
+				t.Errorf("Expected %d files, got %d for test: %s", e.numberOfFiles, len(uploadedFiles), e.testName)
+			}
+
+			if len(uploadedFiles) > 0 && !e.renameFile {
+				for _, upFile := range uploadedFiles {
+					if upFile.NewFileName != upFile.OriginalFileName {
+						t.Error("file renamed when should not")
+					}
+				}
+			}
+
+			for _, file := range uploadedFiles {
+				path := filepath.Join(uploadDir, file.NewFileName)
+				if _, err := os.Stat(path); os.IsNotExist(err) {
+					t.Errorf("%s: expected file to exist: %s", file.OriginalFileName, err.Error())
+				}
+
+				_ = os.Remove(path)
+			}
+
+			pr.Close()
+
+			wg.Wait()
+
+		})
+	}
+}
+
+func TestTools_UploadOneFile(t *testing.T) {
+	for _, e := range uploadFileTest {
+		t.Run(e.testName, func(t *testing.T) {
+			pr, pw := io.Pipe()
+			writer := multipart.NewWriter(pw)
+			wg := sync.WaitGroup{}
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer pw.Close()
+				defer writer.Close()
+
+				filePath := filepath.Join(e.dirName, e.fileNames[0])
 				part, err := writer.CreateFormFile("file", filePath)
 				if err != nil {
 					return
@@ -112,125 +196,47 @@ func TestToolsUploadFiles(t *testing.T) {
 				if err != nil {
 					return
 				}
+			}()
+
+			request := httptest.NewRequest("POST", "/", pr)
+			request.Header.Add("Content-Type", writer.FormDataContentType())
+
+			testTools := Tools{
+				AllowedFileTypes: e.allowedFileTypes,
+				MaxFileSize:      int(e.maxFileSize),
 			}
-		}()
 
-		request := httptest.NewRequest("POST", "/", pr)
-		request.Header.Add("Content-Type", writer.FormDataContentType())
+			uploadDir := filepath.Join(e.dirName, "uploads")
+			os.MkdirAll(uploadDir, 0755)
 
-		testTools := Tools{
-			AllowedFileTypes: e.allowedFileTypes,
-			MaxFileSize:      int(e.maxFileSize),
-		}
+			uploadedFile, err := testTools.UploadOneFile(request, uploadDir, e.renameFile)
 
-		uploadDir := filepath.Join(e.dirName, "uploads")
-
-		uploadedFiles, err := testTools.UploadFiles(request, uploadDir, e.renameFile)
-
-		if err != nil && !e.expectsError {
-			t.Error("test error:", err, "for test:", e.testName)
-		}
-
-		if err == nil && e.expectsError {
-			t.Errorf("%s: expected error but none found", e.testName)
-		}
-
-		if !e.expectsError && len(uploadedFiles) != e.numberOfFiles {
-			t.Errorf("Expected %d files, got %d for test: %s", e.numberOfFiles, len(uploadedFiles), e.testName)
-		}
-
-		if len(uploadedFiles) > 0 && !e.renameFile {
-			for _, upFile := range uploadedFiles {
-				if upFile.NewFileName != upFile.OriginalFileName {
-					t.Error("file renamed when should not")
+			if err != nil {
+				if !e.expectsError {
+					t.Errorf("%s: unexpected error: %s", e.testName, err.Error())
 				}
-			}
-		}
+			} else {
+				if e.expectsError {
+					t.Errorf("%s: expected error but none found", e.testName)
+				}
 
-		for _, file := range uploadedFiles {
-			path := filepath.Join(uploadDir, file.NewFileName)
-			if _, err := os.Stat(path); os.IsNotExist(err) {
-				t.Errorf("%s: expected file to exist: %s", file.OriginalFileName, err.Error())
-			}
-
-			_ = os.Remove(path)
-		}
-
-		pr.Close()
-
-		wg.Wait()
-	}
-}
-
-func TestToolsUploadOneFile(t *testing.T) {
-	for _, e := range uploadFileTest {
-		pr, pw := io.Pipe()
-		writer := multipart.NewWriter(pw)
-		wg := sync.WaitGroup{}
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer pw.Close()
-			defer writer.Close()
-
-			filePath := filepath.Join(e.dirName, e.fileNames[0])
-			part, err := writer.CreateFormFile("file", filePath)
-			if err != nil {
-				return
-			}
-
-			f, err := os.Open(filePath)
-			if err != nil {
-				return
-			}
-
-			_, err = io.Copy(part, f)
-			f.Close()
-
-			if err != nil {
-				return
-			}
-		}()
-
-		request := httptest.NewRequest("POST", "/", pr)
-		request.Header.Add("Content-Type", writer.FormDataContentType())
-
-		testTools := Tools{
-			AllowedFileTypes: e.allowedFileTypes,
-			MaxFileSize:      int(e.maxFileSize),
-		}
-
-		uploadDir := filepath.Join(e.dirName, "uploads")
-		os.MkdirAll(uploadDir, 0755)
-
-		uploadedFile, err := testTools.UploadOneFile(request, uploadDir, e.renameFile)
-
-		if err != nil {
-			if !e.expectsError {
-				t.Errorf("%s: unexpected error: %s", e.testName, err.Error())
-			}
-		} else {
-			if e.expectsError {
-				t.Errorf("%s: expected error but none found", e.testName)
-			}
-
-			if uploadedFile != nil {
-				if !e.renameFile {
-					if uploadedFile.NewFileName != uploadedFile.OriginalFileName {
-						t.Errorf("%s: file renamed when should not", e.testName)
+				if uploadedFile != nil {
+					if !e.renameFile {
+						if uploadedFile.NewFileName != uploadedFile.OriginalFileName {
+							t.Errorf("%s: file renamed when should not", e.testName)
+						}
+					}
+					path := filepath.Join(uploadDir, uploadedFile.NewFileName)
+					if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+						t.Errorf("%s: expected file to exist: %s", e.testName, statErr.Error())
+					} else {
+						_ = os.Remove(path)
 					}
 				}
-				path := filepath.Join(uploadDir, uploadedFile.NewFileName)
-				if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
-					t.Errorf("%s: expected file to exist: %s", e.testName, statErr.Error())
-				} else {
-					_ = os.Remove(path)
-				}
 			}
-		}
-		pr.Close()
-		wg.Wait()
+			pr.Close()
+			wg.Wait()
+		})
 	}
 }
 
@@ -247,21 +253,23 @@ var testDirs = []struct {
 	{"dir cannot be created", true, "C:/Users/x0lc/tempDir", 0755, "mkdir C:/Users/x0lc: Access is denied."},
 }
 
-func TestToolsCreateDirIfNotExists(t *testing.T) {
+func TestTools_CreateDirIfNotExists(t *testing.T) {
 	var testTools Tools
 	for _, e := range testDirs {
-		err := testTools.CreateDirIfNotExists(e.dirName, e.mode)
-		if err != nil && !e.expectsError {
-			t.Error("expected no error for test", e.testName, "but found one:", err)
-		}
+		t.Run(e.testName, func(t *testing.T) {
+			err := testTools.CreateDirIfNotExists(e.dirName, e.mode)
+			if err != nil && !e.expectsError {
+				t.Error("expected no error for test", e.testName, "but found one:", err)
+			}
 
-		if err == nil && e.expectsError {
-			t.Error("expected one error for test", e.testName, "but none found:", err)
-		}
+			if err == nil && e.expectsError {
+				t.Error("expected one error for test", e.testName, "but none found:", err)
+			}
 
-		if e.expectsError && err.Error() != e.errorMsg {
-			t.Error("wrong error received for test", e.testName, "expected:", e.errorMsg, "received:", err)
-		}
+			if e.expectsError && err.Error() != e.errorMsg {
+				t.Error("wrong error received for test", e.testName, "expected:", e.errorMsg, "received:", err)
+			}
+		})
 	}
 
 	if err := os.RemoveAll(testDirs[0].dirName); err != nil {
@@ -283,30 +291,31 @@ var slugTestTable = []struct {
 	{"empty string not allowed", true, "empty string not allowed", "", ""},
 }
 
-func TestToolsSlugfy(t *testing.T) {
+func TestTools_Slugfy(t *testing.T) {
 	var testTools Tools
 	for _, e := range slugTestTable {
-		slug, err := testTools.Slugfy(e.stringToSlugfy)
-		if err != nil && !e.expectsError {
-			t.Error("unexpected error for test", e.testName, "error:", err)
-		}
+		t.Run(e.testName, func(t *testing.T) {
+			slug, err := testTools.Slugfy(e.stringToSlugfy)
+			if err != nil && !e.expectsError {
+				t.Error("unexpected error for test", e.testName, "error:", err)
+			}
 
-		if err == nil && e.expectsError {
-			t.Error("expected error for test", e.testName, "error:", e.errorMsg, "but none found")
-		}
+			if err == nil && e.expectsError {
+				t.Error("expected error for test", e.testName, "error:", e.errorMsg, "but none found")
+			}
 
-		if err != nil && e.errorMsg != err.Error() {
-			t.Error("unexpected error message for test", e.testName, "expected error message:", e.errorMsg, "found:", err.Error())
-		}
+			if err != nil && e.errorMsg != err.Error() {
+				t.Error("unexpected error message for test", e.testName, "expected error message:", e.errorMsg, "found:", err.Error())
+			}
 
-		if slug != e.expectedSlug {
-			t.Error("unexpected slug for test", e.testName, "expected slug:", e.expectedSlug, "slug received:", slug)
-		}
+			if slug != e.expectedSlug {
+				t.Error("unexpected slug for test", e.testName, "expected slug:", e.expectedSlug, "slug received:", slug)
+			}
+		})
 	}
-
 }
 
-func TestToolsDownloadStaticFile(t *testing.T) {
+func TestTools_DownloadStaticFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	fileName := "testfile.txt"
 	content := []byte("conteúdo do arquivo de teste")
@@ -338,7 +347,7 @@ func TestToolsDownloadStaticFile(t *testing.T) {
 	}
 }
 
-func TestToolsRunServer(t *testing.T) {
+func TestTools_RunServer(t *testing.T) {
 	tools := &Tools{}
 
 	t.Run("Graceful Shutdown via Context", func(t *testing.T) {
@@ -395,7 +404,7 @@ func TestToolsRunServer(t *testing.T) {
 
 	t.Run("Graceful Shutdown via Signal Agnostic", func(t *testing.T) {
 		tools := &Tools{}
-		
+
 		testChan := make(chan os.Signal, 1)
 		tools.signalChan = testChan
 
@@ -419,4 +428,110 @@ func TestToolsRunServer(t *testing.T) {
 			t.Error("server did not respond to injected signal")
 		}
 	})
+}
+
+func TestTools_ReadJSON(t *testing.T) {
+	tools := &Tools{}
+
+	// Define a dummy struct for testing
+	type Person struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	// Table-driven tests
+	testCases := []struct {
+		name          string
+		json          string
+		maxSize       int
+		allowUnknown  bool
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name:        "Valid JSON",
+			json:        `{"name": "Jack", "age": 30}`,
+			expectError: false,
+		},
+		{
+			name:          "Malformed JSON",
+			json:          `{"name": "Jack", "age": 30`, // missing closing brace
+			expectError:   true,
+			errorContains: "badly-formed JSON",
+		},
+		{
+			name:          "Incorrect Type",
+			json:          `{"name": "Jack", "age": "thirty"}`, // age should be int
+			expectError:   true,
+			errorContains: "incorrect JSON type",
+		},
+		{
+			name:          "Empty Body",
+			json:          ``,
+			expectError:   true,
+			errorContains: "body must not be empty",
+		},
+		{
+			name:          "Unknown Field (Disallowed)",
+			json:          `{"name": "Jack", "age": 30, "height": 180}`,
+			allowUnknown:  false,
+			expectError:   true,
+			errorContains: "unknown key",
+		},
+		{
+			name:         "Unknown Field (Allowed)",
+			json:         `{"name": "Jack", "age": 30, "height": 180}`,
+			allowUnknown: true,
+			expectError:  false,
+		},
+		{
+			name:          "Multiple JSON Values",
+			json:          `{"name": "Jack"}{"name": "Jill"}`,
+			expectError:   true,
+			errorContains: "only one JSON value",
+		},
+		{
+			name:          "Body Too Large",
+			json:          `{"name": "Jack", "age": 30}`,
+			maxSize:       5, // extremely small limit
+			expectError:   true,
+			errorContains: "larger than",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+
+			tools.MaxJSONSize = tc.maxSize
+			tools.AllowUnknownFields = tc.allowUnknown
+
+			// Create request
+			req := httptest.NewRequest("POST", "/", bytes.NewReader([]byte(tc.json)))
+			rr := httptest.NewRecorder()
+
+			var data Person
+			err := tools.ReadJSON(rr, req, &data)
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("%s: expected an error but got nil", tc.name)
+				}
+
+				if err != nil && tc.errorContains != "" {
+					if !contains(err.Error(), tc.errorContains) {
+						t.Errorf("%s: expected error to contain %q, got %q", tc.name, tc.errorContains, err.Error())
+					}
+				}
+			} else {
+				if err != nil {
+					t.Errorf("%s: expected no error but got %v", tc.name, err)
+				}
+			}
+		})
+	}
+}
+
+// Helper to check for substrings in errors
+func contains(s, substr string) bool {
+	return bytes.Contains([]byte(s), []byte(substr))
 }

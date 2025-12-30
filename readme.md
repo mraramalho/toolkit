@@ -5,6 +5,7 @@ A versatile Go helper library for handling common web development tasks, includi
 ## Features
 
 * **Graceful Server Shutdown**: Run HTTP or HTTPS servers that handle termination signals (`os.Interrupt`) and context cancellation without dropping active requests.
+* **JSON Decoding**: Securely parse JSON requests with configurable size limits and strict field validation.
 * **Multi-File Uploads**: Easily handle single or multiple file uploads with built-in MIME type validation and size limits.
 * **Security**: Validate file types (MIME) and enforce maximum file size limits.
 * **File Renaming**: Automatically generate safe, random filenames to prevent overwriting and path injection.
@@ -50,7 +51,34 @@ func main() {
 
 ```
 
-### 2. Handling File Uploads
+### 2. Reading JSON
+
+`ReadJSON` provides a secure way to decode requests, protecting against oversized payloads and malformed data.
+
+```go
+type UserPayload struct {
+    Name string `json:"name"`
+    Age  int    `json:"age"`
+}
+
+func MyHandler(w http.ResponseWriter, r *http.Request) {
+    var payload UserPayload
+    
+    t.MaxJSONSize = 1024 * 512 // 512KB limit
+    t.AllowUnknownFields = false
+
+    err := t.ReadJSON(w, r, &payload)
+    if err != nil {
+        // Returns helpful, human-readable errors for bad JSON, 
+        // incorrect types, or oversized bodies
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+}
+
+```
+
+### 3. Handling File Uploads
 
 Restrict file types and sizes before processing uploads. Files can be automatically renamed to prevent collisions.
 
@@ -71,7 +99,7 @@ func MyHandler(w http.ResponseWriter, r *http.Request) {
 
 ```
 
-### 3. Generating Slugs
+### 4. Generating Slugs
 
 Convert strings into URL-safe formats (e.g., `"Hello World!"` -> `"hello-world"`).
 
@@ -81,7 +109,7 @@ slug, _ := t.Slugfy("My Awesome Post Title @2025")
 
 ```
 
-### 4. Forced File Downloads
+### 5. Forced File Downloads
 
 Use `DownloadStaticFile` to ensure a file is downloaded rather than opened in the browser window.
 
@@ -91,7 +119,7 @@ func Download(w http.ResponseWriter, r *http.Request) {
 }
 
 ```
-### 5. Utility Methods
+### 6. Utility Methods
 
 * **`RandomString(len)`**: Generates a random string using a safe character set.
 * **`CreateDirIfNotExists(path, mode)`**: Recursively creates folders if they are missing.
@@ -103,12 +131,15 @@ func Download(w http.ResponseWriter, r *http.Request) {
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `MaxFileSize` | `int` | Maximum allowed size in bytes (defaults to 1GB). |
-| `AllowedFileTypes` | `[]string` | Slice of allowed MIME types (e.g., `image/jpeg`, `application/pdf`). |
+| `MaxFileSize` | `int` | Maximum allowed size in bytes for file uploads. |
+| `MaxJSONSize` | `int` | Maximum allowed size in bytes for JSON bodies (defaults to 1MB). |
+| `AllowedFileTypes` | `[]string` | Slice of allowed MIME types for uploads. |
+| `AllowUnknownFields` | `bool` | If false, `ReadJSON` returns an error if the body contains extra keys. |
 
 ### Methods Summary
 
 * **`RunServer`**: Starts an HTTP/HTTPS server with cross-platform graceful shutdown logic.
+* **`ReadJSON`**: Decodes a JSON request body into a pointer with error wrapping.
 * **`UploadFiles`**: Processes multipart form uploads and returns metadata.
 * **`UploadOneFile`**: Convenience method for handling a single file upload.
 * **`Slugfy`**: Returns a cleaned, lowercase, hyphenated string.
@@ -120,7 +151,6 @@ func Download(w http.ResponseWriter, r *http.Request) {
 
 ## Roadmap
 
-* [ ] Read JSON to struct (with validation)
 * [ ] Write JSON to response
 * [ ] Push JSON to a remote server
 
