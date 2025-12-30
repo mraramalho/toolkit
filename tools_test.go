@@ -1,14 +1,17 @@
 package toolkit
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestToolsRandomString(t *testing.T) {
@@ -333,4 +336,87 @@ func TestToolsDownloadStaticFile(t *testing.T) {
 	if rr.Body.String() != string(content) {
 		t.Errorf("conteúdo do arquivo incorreto: esperado %s, recebeu %s", string(content), rr.Body.String())
 	}
+}
+
+func TestToolsRunServer(t *testing.T) {
+	tools := &Tools{}
+
+	t.Run("Graceful Shutdown via Context", func(t *testing.T) {
+		// Use an available port for testing
+		srv := &http.Server{
+			Addr: "localhost:8081",
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}),
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Channel to capture the error from RunServer
+		errChan := make(chan error)
+
+		go func() {
+			errChan <- tools.RunServer(ctx, srv, 2*time.Second)
+		}()
+
+		// Give the server a moment to start
+		time.Sleep(100 * time.Millisecond)
+
+		// Trigger shutdown via context
+		cancel()
+
+		select {
+		case err := <-errChan:
+			if err != nil {
+				t.Errorf("expected nil error on graceful shutdown, got %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("server did not shut down within timeout")
+		}
+	})
+
+	t.Run("Server Port Conflict", func(t *testing.T) {
+		// Start a dummy listener on a port
+		srv1 := &http.Server{Addr: "localhost:8082"}
+		go srv1.ListenAndServe()
+		defer srv1.Close()
+
+		time.Sleep(100 * time.Millisecond)
+
+		// Try to start our server on the same port
+		srv2 := &http.Server{Addr: "localhost:8082"}
+		ctx := context.Background()
+
+		err := tools.RunServer(ctx, srv2, 1*time.Second)
+		if err == nil {
+			t.Error("expected an error due to port conflict, got nil")
+		}
+	})
+
+	t.Run("Graceful Shutdown via Signal Agnostic", func(t *testing.T) {
+		tools := &Tools{}
+		
+		testChan := make(chan os.Signal, 1)
+		tools.signalChan = testChan
+
+		srv := &http.Server{Addr: "localhost:0"}
+		errChan := make(chan error, 1)
+
+		go func() {
+			errChan <- tools.RunServer(context.Background(), srv, 2*time.Second)
+		}()
+
+		time.Sleep(100 * time.Millisecond)
+
+		testChan <- os.Interrupt
+
+		select {
+		case err := <-errChan:
+			if err != nil {
+				t.Errorf("expected nil error, got %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("server did not respond to injected signal")
+		}
+	})
 }

@@ -1,15 +1,22 @@
+// toolkit is a versatile Go helper library for handling common web development tasks,
+// including file uploads, directory management, string manipulation, and forced file downloads.
 package toolkit
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/rand/v2"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const randStringSource = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_+"
@@ -19,11 +26,80 @@ const randStringSource = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01
 type Tools struct {
 	MaxFileSize      int
 	AllowedFileTypes []string
+	signalChan       chan os.Signal
 }
 
 // New returns an instance of Tools
 func New() *Tools {
 	return &Tools{}
+}
+
+// RunServer starts a web server with support for HTTP or HTTPS and implements a graceful shutdown.
+//
+// Parameters:
+//   - ctx: A context that, when canceled, will trigger the server shutdown.
+//   - srv: A pointer to an http.Server instance.
+//   - shutdownTimeout: The maximum time to wait for active requests to finish before forcing closure.
+//   - certKeyFiles: An optional variadic slice of strings.
+//     If exactly two strings are provided, they are treated as [certFile, keyFile] for TLS.
+//     If omitted, the function checks srv.TLSConfig or defaults to standard HTTP.
+//
+// The method blocks until a termination signal (SIGINT, SIGTERM) is received,
+// the context is canceled, or the server encounters a fatal error.
+func (t *Tools) RunServer(ctx context.Context, srv *http.Server, shutdownTimeout time.Duration, certKeyFiles ...string) error {
+	serverErrChan := make(chan error, 1)
+
+	go func() {
+		var err error
+
+		// Determine if we should use TLS
+		if len(certKeyFiles) == 2 {
+			log.Printf("starting HTTPS server on %s", srv.Addr)
+			err = srv.ListenAndServeTLS(certKeyFiles[0], certKeyFiles[1])
+		} else if srv.TLSConfig != nil && (len(srv.TLSConfig.Certificates) > 0 || srv.TLSConfig.GetCertificate != nil) {
+			log.Printf("starting HTTPS server on %s (using TLSConfig)", srv.Addr)
+			err = srv.ListenAndServeTLS("", "") // Use certs from TLSConfig
+		} else {
+			log.Printf("starting HTTP server on %s", srv.Addr)
+			err = srv.ListenAndServe()
+		}
+
+		if !errors.Is(err, http.ErrServerClosed) {
+			serverErrChan <- err
+		}
+		close(serverErrChan)
+	}()
+
+	stop := t.signalChan
+	if stop == nil {
+		stop = make(chan os.Signal, 1)
+		signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	}
+
+	select {
+	case err := <-serverErrChan:
+		return err
+	case <-stop:
+		log.Println("shutdown signal received")
+	case <-ctx.Done():
+		log.Println("context canceled")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(
+		context.Background(),
+		shutdownTimeout,
+	)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		if closeErr := srv.Close(); closeErr != nil {
+			return fmt.Errorf("server forced to close: %w", errors.Join(err, closeErr))
+		}
+		return err
+	}
+
+	log.Println("server exited gracefully")
+	return nil
 }
 
 // RandomString generates a safe random string of length l, using randStringSource as source
@@ -181,7 +257,6 @@ func (t *Tools) DownloadStaticFile(w http.ResponseWriter, r *http.Request, p, fi
 
 	http.ServeFile(w, r, filePath)
 }
-
 
 // WORKING WITH JSON
 
