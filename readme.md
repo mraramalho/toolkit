@@ -5,7 +5,7 @@ A versatile Go helper library for handling common web development tasks, includi
 ## Features
 
 * **Graceful Server Shutdown**: Run HTTP or HTTPS servers that handle termination signals (`os.Interrupt`) and context cancellation without dropping active requests.
-* **JSON Decoding**: Securely parse JSON requests with configurable size limits and strict field validation.
+* **JSON Processing**: Securely decode requests with size limits and encode responses with custom headers and status codes.
 * **Multi-File Uploads**: Easily handle single or multiple file uploads with built-in MIME type validation and size limits.
 * **Security**: Validate file types (MIME) and enforce maximum file size limits.
 * **File Renaming**: Automatically generate safe, random filenames to prevent overwriting and path injection.
@@ -51,29 +51,33 @@ func main() {
 
 ```
 
-### 2. Reading JSON
+### 2. Working with JSON
 
-`ReadJSON` provides a secure way to decode requests, protecting against oversized payloads and malformed data.
+The toolkit provides a symmetrical way to read and write JSON, handling error states and headers automatically.
 
 ```go
-type UserPayload struct {
-    Name string `json:"name"`
-    Age  int    `json:"age"`
-}
+func JSONHandler(w http.ResponseWriter, r *http.Request) {
+    var payload struct {
+        Name string `json:"name"`
+    }
 
-func MyHandler(w http.ResponseWriter, r *http.Request) {
-    var payload UserPayload
-    
-    t.MaxJSONSize = 1024 * 512 // 512KB limit
-    t.AllowUnknownFields = false
-
-    err := t.ReadJSON(w, r, &payload)
-    if err != nil {
-        // Returns helpful, human-readable errors for bad JSON, 
-        // incorrect types, or oversized bodies
-        http.Error(w, err.Error(), http.StatusBadRequest)
+    // Read JSON securely
+    if err := t.ReadJSON(w, r, &payload); err != nil {
+        t.WriteJSON(w, http.StatusBadRequest, toolkit.JSONResponse{
+            Error:   true,
+            Message: err.Error(),
+        })
         return
     }
+
+    // Write a standardized JSON response
+    response := toolkit.JSONResponse{
+        Error:   false,
+        Message: "Success",
+        Data:    payload,
+    }
+
+    t.WriteJSON(w, http.StatusAccepted, response)
 }
 
 ```
@@ -140,6 +144,7 @@ func Download(w http.ResponseWriter, r *http.Request) {
 
 * **`RunServer`**: Starts an HTTP/HTTPS server with cross-platform graceful shutdown logic.
 * **`ReadJSON`**: Decodes a JSON request body into a pointer with error wrapping.
+* **`WriteJSON`**: Encodes a response into JSON, sets the `Content-Type`, and writes headers.
 * **`UploadFiles`**: Processes multipart form uploads and returns metadata.
 * **`UploadOneFile`**: Convenience method for handling a single file upload.
 * **`Slugfy`**: Returns a cleaned, lowercase, hyphenated string.

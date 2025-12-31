@@ -261,8 +261,6 @@ func (t *Tools) DownloadStaticFile(w http.ResponseWriter, r *http.Request, p, fi
 	http.ServeFile(w, r, filePath)
 }
 
-// WORKING WITH JSON
-
 // JSONResponse is the type fo sending json around
 type JSONResponse struct {
 	Error   bool        `json:"error"`
@@ -270,21 +268,28 @@ type JSONResponse struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
+// ReadJSON tries to read the body os a request and converts from json to a go data variable.
+// The data parameter takes a pointer of any kind as argument
 func (t *Tools) ReadJSON(w http.ResponseWriter, r *http.Request, data any) error {
+	// 1. Set file limit
 	maxBytes := 1024 * 1024
 	if t.MaxJSONSize > 0 {
 		maxBytes = t.MaxJSONSize
 	}
 
+	// 2. Read body with the limit set
 	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBytes))
 	defer r.Body.Close()
+
+	// 3. Create new JSON decoder
 	dec := json.NewDecoder(r.Body)
 
 	if !t.AllowUnknownFields {
 		dec.DisallowUnknownFields()
 	}
 
-	err := dec.Decode(&data)
+	// 4. Decode data
+	err := dec.Decode(data)
 	if err != nil {
 		var (
 			syntaxError           *json.SyntaxError
@@ -324,6 +329,7 @@ func (t *Tools) ReadJSON(w http.ResponseWriter, r *http.Request, data any) error
 		}
 	}
 
+	// 5. Set safety condition
 	err = dec.Decode(&struct{}{})
 	if err != io.EOF {
 		return errors.New("body must contain only one JSON value")
@@ -332,9 +338,26 @@ func (t *Tools) ReadJSON(w http.ResponseWriter, r *http.Request, data any) error
 	return nil
 }
 
-// TODO: Writing Json
-
+// WriteJSON takes a response status code and arbitrary data and writes json to the client.
+// The data parameter takes a pointer of any kind as argument.
 func (t *Tools) WriteJSON(w http.ResponseWriter, status int, data any, headers ...http.Header) error {
+	out, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	if len(headers) > 0 {
+		for key, value := range headers[0] {
+			w.Header()[key] = value
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, err = w.Write(out)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

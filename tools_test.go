@@ -535,3 +535,22 @@ func TestTools_ReadJSON(t *testing.T) {
 func contains(s, substr string) bool {
 	return bytes.Contains([]byte(s), []byte(substr))
 }
+
+
+func TestTools_WriteJSON(t *testing.T) {
+	var testTools Tools
+
+	rr := httptest.NewRecorder()
+	payload := &JSONResponse{
+		Error: false,
+		Message: "foo",
+	}
+
+	headers := make(http.Header)
+	headers.Add("FOO", "BAR")
+
+	err := testTools.WriteJSON(rr, http.StatusOK, payload, headers)
+	if err != nil {
+		t.Errorf("failed to write JSON: %v", err)
+	}
+}
