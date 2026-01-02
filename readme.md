@@ -167,10 +167,6 @@ func Download(w http.ResponseWriter, r *http.Request) {
 * **`DownloadStaticFile`**: Forces a file download via `Content-Disposition`.
 ---
 
-## Roadmap
-
-* [ ] Push JSON to a remote server
-
 ## License
 
 MIT
