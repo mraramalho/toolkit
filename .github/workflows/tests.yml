@@ -1,0 +1,27 @@
+name: Toolkit CI
+
+# Define quando o teste será executado
+on:
+  push:
+    branches: [ main ]      # Roda quando alguém faz push na main
+  pull_request:
+    branches: [ main ]      # Roda quando um PR é aberto para a main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest  # Usa uma máquina Linux virtual do GitHub
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4 # Faz o download do seu código na máquina virtual
+
+      - name: Configurar o Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'      # Versão do Go que você está a usar
+
+      - name: Instalar dependências
+        run: go mod tidy          # Garante que as dependências estão em dia
+
+      - name: Executar Testes
+        run: go test -v ./...     # Executa todos os testes do projeto de forma detalhada
