@@ -242,41 +242,38 @@ func TestTools_UploadOneFile(t *testing.T) {
 	}
 }
 
-var testDirs = []struct {
-	testName     string
-	expectsError bool
-	dirName      string
-	mode         os.FileMode
-	errorMsg     string
-}{
-	{"creates dir", false, "./tempDir", 0755, ""},
-	{"directory already exists", false, "./tempDir", 0755, ""},
-	{"creates subdirectory", false, "./tempDir/anotherTempDir", 0755, ""},
-	{"dir cannot be created", true, "C:/Users/x0lc/tempDir", 0755, "mkdir C:/Users/x0lc: Access is denied."},
-}
-
 func TestTools_CreateDirIfNotExists(t *testing.T) {
-	var testTools Tools
-	for _, e := range testDirs {
-		t.Run(e.testName, func(t *testing.T) {
-			err := testTools.CreateDirIfNotExists(e.dirName, e.mode)
-			if err != nil && !e.expectsError {
-				t.Error("expected no error for test", e.testName, "but found one:", err)
-			}
+    var testTools Tools
 
-			if err == nil && e.expectsError {
-				t.Error("expected one error for test", e.testName, "but none found:", err)
-			}
+    parentDir := t.TempDir()
 
-			if e.expectsError && err.Error() != e.errorMsg {
-				t.Error("wrong error received for test", e.testName, "expected:", e.errorMsg, "received:", err)
-			}
-		})
-	}
+    var testDirs = []struct {
+        testName     string
+        expectsError bool
+        dirName      string
+        mode         os.FileMode
+    }{
+        {"creates dir", false, filepath.Join(parentDir, "newDir"), 0755},
+        {"directory already exists", false, filepath.Join(parentDir, "existingDir"), 0755},
+        {"creates subdirectory", false, filepath.Join(parentDir, "sub/level/dir"), 0755},
+        {"invalid path error", true, filepath.Join(parentDir, "invalid\x00path"), 0755},
+    }
 
-	if err := os.RemoveAll(testDirs[0].dirName); err != nil {
-		t.Error("error removing temdirs:", err)
-	}
+    _ = os.Mkdir(filepath.Join(parentDir, "existingDir"), 0755)
+
+    for _, e := range testDirs {
+        t.Run(e.testName, func(t *testing.T) {
+            err := testTools.CreateDirIfNotExists(e.dirName, e.mode)
+            
+            if err != nil && !e.expectsError {
+                t.Errorf("%s: expected no error, but found: %v", e.testName, err)
+            }
+
+            if err == nil && e.expectsError {
+                t.Errorf("%s: expected an error, but got nil", e.testName)
+            }
+        })
+    }
 }
 
 var slugTestTable = []struct {
