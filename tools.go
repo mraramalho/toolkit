@@ -3,12 +3,14 @@
 package toolkit
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"math/rand/v2"
 	"net/http"
 	"os"
@@ -22,14 +24,19 @@ import (
 
 const randStringSource = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_+"
 
+type ErrorTemplate interface {
+	Prepare(err error, status int) any
+}
+
 // Tools is the type used to instantiate this module. Any variable of this type will
 // have access to all the methods with the reciever *Tools
 type Tools struct {
-	MaxFileSize        int
-	AllowedFileTypes   []string
-	MaxJSONSize        int
-	AllowUnknownFields bool
-	signalChan         chan os.Signal
+	MaxFileSize           int
+	AllowedFileTypes      []string
+	MaxJSONSize           int
+	AllowUnknownFields    bool
+	ErrorResponseTemplate ErrorTemplate
+	signalChan            chan os.Signal
 }
 
 // New returns an instance of Tools
@@ -268,9 +275,17 @@ type JSONResponse struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
+func (j JSONResponse) Prepare(err error, status int) interface{} {
+	return JSONResponse{
+		Error:   true,
+		Message: err.Error(),
+		Data:    status,
+	}
+}
+
 // ReadJSON tries to read the body os a request and converts from json to a go data variable.
 // The data parameter takes a pointer of any kind as argument
-func (t *Tools) ReadJSON(w http.ResponseWriter, r *http.Request, data any) error {
+func (t *Tools) ReadJSON(w http.ResponseWriter, r *http.Request, data interface{}) error {
 	// 1. Set file limit
 	maxBytes := 1024 * 1024
 	if t.MaxJSONSize > 0 {
@@ -340,16 +355,14 @@ func (t *Tools) ReadJSON(w http.ResponseWriter, r *http.Request, data any) error
 
 // WriteJSON takes a response status code and arbitrary data and writes json to the client.
 // The data parameter takes a pointer of any kind as argument.
-func (t *Tools) WriteJSON(w http.ResponseWriter, status int, data any, headers ...http.Header) error {
+func (t *Tools) WriteJSON(w http.ResponseWriter, status int, data interface{}, headers ...http.Header) error {
 	out, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
 
 	if len(headers) > 0 {
-		for key, value := range headers[0] {
-			w.Header()[key] = value
-		}
+		maps.Copy(w.Header(), headers[0])
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -373,22 +386,44 @@ func (t *Tools) ErrorJSON(w http.ResponseWriter, err error, status ...int) error
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	resp := JSONResponse{
-		Error: true,
-		Message: err.Error(),
+
+	var payload interface{}
+	if t.ErrorResponseTemplate != nil {
+		payload = t.ErrorResponseTemplate.Prepare(err, statusCode)
+	} else {
+		payload = JSONResponse{}.Prepare(err, 0)
 	}
 
-	out, err := json.Marshal(resp)
-	if err != nil {
-		return err
-	}
-
-	_, err = w.Write(out)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return t.WriteJSON(w, statusCode, payload)
 }
 
-// TODO: Push Json to a remote server
+// PushJSONToRemote posts arbitrary data to some URL as JSON, and returns the response, status code and error, if any.
+// The final parameter, client, is optional. If none is specified, standard http.Client is set as default.
+func (t *Tools) PushJSONToRemote(uri string, data interface{}, client ...*http.Client) (*http.Response, int, error) {
+	// create json
+	out, err := json.Marshal(data)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// check for the custom http client
+	httpClient := &http.Client{}
+	if len(client) > 0 {
+		httpClient = client[0]
+	}
+
+	// build the request and set the header
+	request, err := http.NewRequest("POST", uri, bytes.NewBuffer(out))
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	// call the remote uri
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, 0, err
+	}
+	// send response back
+	return response, response.StatusCode, nil
+}
