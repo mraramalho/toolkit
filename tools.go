@@ -362,4 +362,33 @@ func (t *Tools) WriteJSON(w http.ResponseWriter, status int, data any, headers .
 	return nil
 }
 
+// ErrorJSON is a convenience method for error handling and writing to JSON.
+// It receives a variadic status code, if none is passed Bad Request will be set as default.
+func (t *Tools) ErrorJSON(w http.ResponseWriter, err error, status ...int) error {
+	statusCode := http.StatusBadRequest
+
+	if len(status) > 0 {
+		statusCode = status[0]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	resp := JSONResponse{
+		Error: true,
+		Message: err.Error(),
+	}
+
+	out, err := json.Marshal(resp)
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(out)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // TODO: Push Json to a remote server

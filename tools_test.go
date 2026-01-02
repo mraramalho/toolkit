@@ -3,6 +3,8 @@ package toolkit
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -536,13 +538,12 @@ func contains(s, substr string) bool {
 	return bytes.Contains([]byte(s), []byte(substr))
 }
 
-
 func TestTools_WriteJSON(t *testing.T) {
 	var testTools Tools
 
 	rr := httptest.NewRecorder()
 	payload := &JSONResponse{
-		Error: false,
+		Error:   false,
 		Message: "foo",
 	}
 
@@ -552,5 +553,29 @@ func TestTools_WriteJSON(t *testing.T) {
 	err := testTools.WriteJSON(rr, http.StatusOK, payload, headers)
 	if err != nil {
 		t.Errorf("failed to write JSON: %v", err)
+	}
+}
+
+func TestTools_ErrorJSON(t *testing.T) {
+	var testTools Tools
+
+	rr := httptest.NewRecorder()
+	err := testTools.ErrorJSON(rr, errors.New("service unavailable"), http.StatusServiceUnavailable)
+	if err != nil {
+		t.Errorf("error not expected: %s", err)
+	}
+
+	var payload JSONResponse
+	err = json.NewDecoder(rr.Body).Decode(&payload)
+	if err != nil {
+		t.Error("received error when decoding JSON", err)
+	}
+
+	if !payload.Error {
+		t.Error("error set to false in JSON, and it should be true")
+	}
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 and got %d", rr.Code)
 	}
 }
